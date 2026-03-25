@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "outDir": "dist-electron",
+    "rootDir": ".",
+    "types": ["node"],
+    "resolveJsonModule": true
+  },
+  "include": [
+    "electron/**/*.ts",
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "tests",
+    "vitest.config.ts"
+  ]
+}

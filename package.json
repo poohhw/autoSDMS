@@ -1,0 +1,73 @@
+{
+  "name": "autosdms",
+  "version": "0.2.2",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/main.ts",
+    "register:otherwork": "tsx src/registerOtherWork.ts",
+    "register:weekly": "tsx src/registerWeeklyReport.ts",
+    "electron:build-ts": "node -e \"const{execSync:r}=require('child_process');try{r('tsc -p tsconfig.electron.json',{stdio:'inherit'})}catch{};const fs=require('fs'),p=require('path');fs.writeFileSync('dist-electron/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n');const src='electron/renderer',dst='dist-electron/electron/renderer';fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src)){fs.copyFileSync(p.join(src,f),p.join(dst,f))}\"",
+    "electron:dev": "npm run electron:build-ts && electron dist-electron/electron/main.js",
+    "electron:pack": "npm run electron:build-ts && electron-builder --win --dir",
+    "electron:dist": "npm run electron:build-ts && electron-builder --win",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:otherwork-popup": "node scripts/test-other-work-popup.mjs"
+  },
+  "build": {
+    "appId": "com.gcsc.autosdms",
+    "productName": "autoSDMS",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "node_modules/**/*",
+      "!node_modules/.cache/**/*",
+      "!node_modules/electron/**/*",
+      "!node_modules/electron-builder/**/*",
+      "!node_modules/tsx/**/*",
+      "!node_modules/vitest/**/*",
+      "!node_modules/typescript/**/*",
+      "!node_modules/playwright-core/.local-browsers/**/*",
+      "!node_modules/playwright/.local-browsers/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false,
+      "signtoolOptions": null
+    },
+    "forceCodeSigning": false,
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "artifactName": "${productName}-${version}-setup.exe",
+      "shortcutName": "autoSDMS"
+    },
+    "publish": [{
+      "provider": "github",
+      "owner": "hwjeong",
+      "repo": "autoSDMS"
+    }],
+    "asar": false
+  },
+  "dependencies": {
+    "@notionhq/client": "^5.1.0",
+    "dotenv": "^17.2.3",
+    "electron-updater": "^6.8.3",
+    "playwright": "^1.53.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "electron": "^41.0.3",
+    "electron-builder": "^26.8.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}

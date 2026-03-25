@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>autoSDMS</title>
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <div class="header">
+      <h1>autoSDMS</h1>
+      <div class="header-right">
+        <button class="btn-link" id="btnOpenNotion" type="button" title="Notion 업무일지 DB 열기">
+          <svg width="16" height="16" viewBox="0 0 100 100" fill="none"><path d="M6.017 4.313l55.333-4.087c6.797-.583 8.543-.19 12.817 2.917l17.663 12.443c2.913 2.14 3.883 2.723 3.883 5.053v68.243c0 4.277-1.553 6.807-6.99 7.193L24.467 99.967c-4.08.193-6.023-.39-8.16-3.113L3.3 79.94c-2.333-3.113-3.3-5.443-3.3-8.167V11.113c0-3.497 1.553-6.413 6.017-6.8z" fill="#fff"/><path d="M61.35.227l-55.333 4.087C1.553 4.7 0 7.617 0 11.113v60.66c0 2.723.967 5.053 3.3 8.167l12.993 16.913c2.137 2.723 4.08 3.307 8.16 3.113l64.257-3.89c5.433-.387 6.99-2.917 6.99-7.193V20.64c0-2.21-.82-2.873-3.49-4.733L74.167 3.143C69.893.227 68.147-.357 61.35.227zM25.33 16.56c-5.2.34-6.38.417-9.33-1.847L8.927 8.777c-.777-.583-.39-1.36.97-1.553l52.027-3.883c4.467-.39 6.797 1.167 8.543 2.527l8.73 6.22c.387.193.97 1.36.193 1.36l-53.867 3.3-.193-.193v.007zM19.27 88.14V29.2c0-2.527.777-3.693 3.107-3.887l58.053-3.3c2.14-.193 3.107 1.167 3.107 3.693v58.56c0 2.527-.387 4.667-3.883 4.86l-55.72 3.303c-3.497.193-4.66-.97-4.66-4.29h-.003zM73.37 32.7c.387 1.75 0 3.5-1.75 3.7l-2.72.58v43.16c-2.33 1.36-4.47 2.14-6.22 2.14-2.917 0-3.69-.97-5.83-3.5l-17.86-28.06v27.09l5.63 1.36s0 3.5-4.86 3.5l-13.38.78c-.39-.78 0-2.72 1.36-3.11l3.5-.97V38.15l-4.86-.39c-.39-1.75.58-4.28 3.3-4.47l14.35-.97 18.63 28.44V35.03l-4.67-.58c-.39-2.14 1.17-3.69 3.11-3.89l13.37-.87z" fill="#000"/></svg>
+          Notion
+        </button>
+        <span class="version" id="appVersion">v0.0.0</span>
+      </div>
+    </div>
+
+    <!-- Update Banner -->
+    <div class="update-banner" id="updateBanner" style="display:none;">
+      <span id="updateMessage"></span>
+      <button id="btnUpdateAction" type="button">업데이트</button>
+      <button id="btnUpdateDismiss" type="button" class="btn-dismiss">&times;</button>
+    </div>
+
+    <!-- Env Warning -->
+    <div class="env-warning" id="envWarning">
+      <span id="envWarningText"></span>
+      <button id="btnEnvSetup" type="button">설정하기</button>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <div class="control-row">
+        <label>날짜 선택</label>
+        <input type="date" id="datePicker" />
+        <span class="day-badge" id="dayBadge"></span>
+      </div>
+      <div class="control-row">
+        <label>브라우저</label>
+        <div class="radio-group">
+          <label><input type="radio" name="browserMode" value="hidden" checked /> 미표시 (빠름)</label>
+          <label><input type="radio" name="browserMode" value="headed" /> 표시 (디버깅)</label>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-daily" id="btnDaily" type="button">
+          <span class="spinner"></span>
+          일일업무등록
+        </button>
+        <button class="btn btn-weekly" id="btnWeekly" type="button">
+          <span class="spinner"></span>
+          주간 업무등록
+        </button>
+      </div>
+    </div>
+
+    <!-- Log Panel -->
+    <div class="log-container">
+      <div class="log-header">
+        <span>실행 로그</span>
+        <div class="log-actions">
+          <button class="btn-small" id="btnClearLog" type="button">지우기</button>
+        </div>
+      </div>
+      <div class="log-panel" id="logPanel">
+        <div class="log-line info">autoSDMS 준비 완료. 날짜를 선택하고 등록 버튼을 클릭하세요.</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="footer-left">
+        <button class="btn-icon" id="btnOpenLogs" type="button">📁 로그 폴더</button>
+        <button class="btn-icon" id="btnOpenArtifacts" type="button">📁 아티팩트</button>
+        <button class="btn-icon" id="btnManual" type="button">📖 매뉴얼</button>
+        <button class="btn-icon" id="btnSettings" type="button">⚙ 설정</button>
+      </div>
+      <span class="status-text" id="statusText">대기 중</span>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+      <h2>환경변수 설정</h2>
+      <p>ERP 및 Notion 연동에 필요한 정보를 입력하세요.</p>
+
+      <div class="form-group">
+        <label>Notion ID (이메일)</label>
+        <input type="text" id="envNotionId" placeholder="example@email.com" />
+      </div>
+      <div class="form-group">
+        <label>Notion Password</label>
+        <input type="password" id="envNotionPw" />
+      </div>
+      <div class="form-group">
+        <div class="form-label-row">
+          <label>Notion Integration Token</label>
+          <button class="btn-inline-link" id="btnNotionTokenIssue" type="button">🔑 발급하기</button>
+        </div>
+        <input type="text" id="envNotionToken" placeholder="ntn_..." />
+      </div>
+      <div class="form-group">
+        <label>Notion Database ID</label>
+        <input type="text" id="envNotionDbId" placeholder="322455a0898080e2..." />
+        <span class="form-hint">
+          <b>· 웹:</b> 브라우저에서 DB 페이지 열기 → 주소창 URL 확인<br/>
+          <b>· 앱:</b> DB 페이지 우클릭 → "링크 복사"<br/>
+          → notion.so/<b class="hint-id">322455a0898080e2...</b>?v=... 에서 굵은 부분이 ID
+        </span>
+      </div>
+
+      <div class="test-row">
+        <button class="btn-test" id="btnTestNotion" type="button">
+          <span class="btn-test-icon" id="btnTestNotionIcon">🔗</span>
+          <span class="btn-test-label">Notion 연결 테스트</span>
+          <span class="btn-test-status" id="btnTestNotionStatus"></span>
+          <span class="btn-test-spinner" id="btnTestNotionSpinner"></span>
+        </button>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0;" />
+
+      <div class="form-group">
+        <label>ERP ID (사번)</label>
+        <input type="text" id="envCompanyId" />
+      </div>
+      <div class="form-group">
+        <label>ERP Password</label>
+        <input type="password" id="envCompanyPw" />
+      </div>
+      <div class="form-group">
+        <label>직원 이름</label>
+        <input type="text" id="envEmployeeName" placeholder="홍길동" />
+      </div>
+
+      <div class="test-row">
+        <button class="btn-test" id="btnTestErp" type="button">
+          <span class="btn-test-icon" id="btnTestErpIcon">🔗</span>
+          <span class="btn-test-label">ERP 로그인 테스트</span>
+          <span class="btn-test-status" id="btnTestErpStatus"></span>
+          <span class="btn-test-spinner" id="btnTestErpSpinner"></span>
+        </button>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn-modal secondary" id="btnModalCancel" type="button">취소</button>
+        <button class="btn-modal primary" id="btnModalSave" type="button">저장</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Dialog -->
+  <div class="dialog-overlay" id="dialogOverlay">
+    <div class="dialog" id="dialogBox">
+      <div class="dialog-icon" id="dialogIcon"></div>
+      <div class="dialog-title" id="dialogTitle"></div>
+      <div class="dialog-message" id="dialogMessage"></div>
+      <div class="dialog-actions" id="dialogActions"></div>
+    </div>
+  </div>
+
+  <!-- Manual Modal -->
+  <div class="modal-overlay" id="manualModal">
+    <div class="modal manual-modal">
+      <div class="manual-header">
+        <h2>📖 사용 매뉴얼</h2>
+        <button class="btn-modal-close" id="btnManualClose" type="button">&times;</button>
+      </div>
+
+      <div class="manual-tabs">
+        <button class="manual-tab active" data-tab="daily" type="button">📋 일일업무등록</button>
+        <button class="manual-tab" data-tab="weekly" type="button">📊 주간 업무등록</button>
+      </div>
+
+      <!-- 일일업무등록 -->
+      <div class="manual-content active" id="manualDaily">
+        <div class="flow-title">일일업무등록 자동화 흐름</div>
+        <div class="flow-chart">
+          <div class="flow-step">
+            <div class="flow-icon">📅</div>
+            <div class="flow-text">
+              <b>1. 날짜 선택</b>
+              <span>등록할 날짜를 캘린더에서 선택</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">📥</div>
+            <div class="flow-text">
+              <b>2. Notion 데이터 수집</b>
+              <span>해당 날짜의 업무일지를 Notion DB에서 조회</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">🔀</div>
+            <div class="flow-text">
+              <b>3. 카테고리 분기</b>
+              <span>Notion의 카테고리(기타업무 / 요구사항)에 따라 등록 흐름이 나뉨</span>
+            </div>
+          </div>
+          <div class="flow-branch">
+            <div class="flow-branch-col">
+              <div class="flow-branch-label">기타업무</div>
+              <div class="flow-step compact">
+                <div class="flow-icon">📝</div>
+                <div class="flow-text">
+                  <b>ERP 기타업무 등록</b>
+                  <span>중복 자동 skip</span>
+                </div>
+              </div>
+            </div>
+            <div class="flow-branch-col">
+              <div class="flow-branch-label">요구사항</div>
+              <div class="flow-step compact skip">
+                <div class="flow-icon">⏭️</div>
+                <div class="flow-text">
+                  <b>기타업무 등록 생략</b>
+                  <span>스크럼/업무일지만 등록</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">📊</div>
+            <div class="flow-text">
+              <b>4. 일일 스크럼 등록</b>
+              <span>전일 업무 + 금일 예정업무 등록 (기타업무·요구사항 모두 포함, 중복 자동 skip)</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">📒</div>
+            <div class="flow-text">
+              <b>5. 업무일지 등록</b>
+              <span>프로젝트별 업무 내용 등록 (기타업무·요구사항 모두 포함, 중복 자동 skip)</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step done">
+            <div class="flow-icon">✅</div>
+            <div class="flow-text">
+              <b>완료</b>
+              <span>금요일인 경우 주간 업무보고 등록 여부를 추가로 확인</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 주간 업무등록 -->
+      <div class="manual-content" id="manualWeekly">
+        <div class="flow-title">주간 업무등록 자동화 흐름</div>
+        <div class="flow-chart">
+          <div class="flow-step">
+            <div class="flow-icon">📅</div>
+            <div class="flow-text">
+              <b>1. 날짜 선택</b>
+              <span>해당 주에 포함되는 아무 날짜를 선택</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">📥</div>
+            <div class="flow-text">
+              <b>2. 월~금 데이터 수집</b>
+              <span>선택 날짜가 속한 주의 월요일~금요일 Notion 데이터를 수집</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">📁</div>
+            <div class="flow-text">
+              <b>3. 프로젝트별 요약</b>
+              <span>업무 내용을 프로젝트별로 그룹핑 및 중복 제거</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">📝</div>
+            <div class="flow-text">
+              <b>4. ERP 주간보고 등록</b>
+              <span>해당 주차 선택 → 프로젝트별 진행업무 입력 → 등록</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step done">
+            <div class="flow-icon">✅</div>
+            <div class="flow-text">
+              <b>완료</b>
+              <span>주차가 드롭다운에 없는 경우 자동 skip</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"^d|\\\\.json$|\\\\.md$|\\\\.ts$\")",
+      "Bash(npm run:*)",
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(node -e \"const s=require\\(''D:/Codex/autoSDMS/.claude/settings.local.json''\\); console.log\\(''disableAllHooks:'', s.disableAllHooks\\)\")",
+      "Bash(npx tsc:*)",
+      "Bash(npx tsx:*)",
+      "Bash(xargs ls:*)",
+      "Bash(xargs wc:*)",
+      "Bash(find /d/Codex/autoSDMS/src -type f -name *.ts)",
+      "Bash(npm install:*)",
+      "Bash(node -e \":*)",
+      "Bash(npx electron-builder:*)",
+      "Bash(CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --win)",
+      "Bash(npx tsx -e \":*)",
+      "Bash(node -e \"console.log\\(new Date\\(''2026-03-22''\\).toLocaleDateString\\(''ko-KR'', {weekday:''long''}\\)\\)\")",
+      "Bash(node -e \"console.log\\(new Date\\(''2026-03-21''\\).toLocaleDateString\\(''ko-KR'', {weekday:''long''}\\)\\)\")",
+      "Bash(gh auth:*)",
+      "Bash(where gh:*)"
+    ]
+  },
+  "disableAllHooks": true
+}

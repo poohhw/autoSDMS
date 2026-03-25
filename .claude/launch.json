@@ -1,0 +1,25 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "notion-query",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--"]
+    },
+    {
+      "name": "register-otherwork",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "register:otherwork", "--"]
+    },
+    {
+      "name": "test-watch",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "test:watch"]
+    },
+    {
+      "name": "test-otherwork-popup",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "test:otherwork-popup"]
+    }
+  ]
+}
