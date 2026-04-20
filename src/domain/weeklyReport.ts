@@ -7,12 +7,24 @@ export interface WeeklyProjectSummary {
 
 /**
  * workComment에서 업무 내용 줄을 추출한다.
- * 모든 줄을 대상으로 하되, 선행 "." 이 있으면 제거한다.
+ * - 앞 공백을 먼저 제거(trim)한 뒤 구조를 판단한다.
+ * - "-"로 시작하면 하위항목 → "- 내용" 형태로 정규화
+ * - "."으로 시작하면 ERP 형식 하위항목 → "- 내용" 형태로 정규화
+ * - 그 외는 타이틀 → 그대로 반환
  */
 function extractContentLines(workComment: string): string[] {
   return workComment
     .split("\n")
-    .map((l) => l.replace(/^\.+\s*/, "").trim())
+    .map((l) => {
+      const trimmed = l.trim();
+      if (trimmed.startsWith("-")) {
+        return "- " + trimmed.replace(/^-+\s*/, "");
+      }
+      if (trimmed.startsWith(".")) {
+        return "- " + trimmed.replace(/^\.+\s*/, "");
+      }
+      return trimmed;
+    })
     .filter(Boolean);
 }
 
@@ -62,8 +74,7 @@ export function formatWeeklySummary(summaries: WeeklyProjectSummary[]): string {
 
   for (const summary of summaries) {
     const header = `[${summary.project}]`;
-    const bullets = summary.items.map((item) => `- ${item}`);
-    sections.push([header, ...bullets].join("\n"));
+    sections.push([header, ...summary.items].join("\n"));
   }
 
   return sections.join("\n\n");

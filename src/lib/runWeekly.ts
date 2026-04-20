@@ -4,6 +4,7 @@ import { loadCompanyEnv, loadNotionEnv } from "../config/env.js";
 import { getWeekdayRange } from "../domain/businessDay.js";
 import { formatWeeklySummary, groupByProject } from "../domain/weeklyReport.js";
 import { ErpOtherWorkRegistrar } from "../erp/otherWorkRegistrar.js";
+import { checkSignal } from "../lib/cancellation.js";
 import { NotionDailyFetcher } from "../notion/notionClient.js";
 import { mapNotionPagesToOtherWorkDrafts, type OtherWorkDraft } from "../notion/otherWorkMapper.js";
 
@@ -12,10 +13,11 @@ export interface WeeklyRunOptions {
   headed: boolean;
   slowMoMs?: number;
   dryRun?: boolean;
+  signal?: AbortSignal;
 }
 
 export async function runWeeklyRegistration(options: WeeklyRunOptions): Promise<void> {
-  const { dateYmd, headed, slowMoMs = 0, dryRun = false } = options;
+  const { dateYmd, headed, slowMoMs = 0, dryRun = false, signal } = options;
   const targetDate = new Date(`${dateYmd}T00:00:00`);
 
   const weekRange = getWeekdayRange(targetDate);
@@ -28,6 +30,7 @@ export async function runWeeklyRegistration(options: WeeklyRunOptions): Promise<
   // 월~금 데이터 수집
   const allItems: OtherWorkDraft[] = [];
   for (const ymd of weekRange) {
+    checkSignal(signal);
     console.log(`[FETCH] ${ymd} ...`);
     const dayData = await notion.fetchByDate(ymd);
     const items = mapNotionPagesToOtherWorkDrafts(dayData.pages);
@@ -69,10 +72,11 @@ export async function runWeeklyRegistration(options: WeeklyRunOptions): Promise<
     return;
   }
 
+  checkSignal(signal);
   // ERP 주간 업무보고 등록
   const registrar = new ErpOtherWorkRegistrar(companyEnv, {
     headed,
     slowMoMs: Number.isFinite(slowMoMs) && slowMoMs > 0 ? slowMoMs : 0
   });
-  await registrar.registerWeeklyStandalone(summaries, targetDate);
+  await registrar.registerWeeklyStandalone(summaries, targetDate, signal);
 }

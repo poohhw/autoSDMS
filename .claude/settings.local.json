@@ -19,7 +19,15 @@
       "Bash(node -e \"console.log\\(new Date\\(''2026-03-22''\\).toLocaleDateString\\(''ko-KR'', {weekday:''long''}\\)\\)\")",
       "Bash(node -e \"console.log\\(new Date\\(''2026-03-21''\\).toLocaleDateString\\(''ko-KR'', {weekday:''long''}\\)\\)\")",
       "Bash(gh auth:*)",
-      "Bash(where gh:*)"
+      "Bash(where gh:*)",
+      "Bash(node -e \"const fs=require\\(''fs''\\);const buf=fs.readFileSync\\(''assets/icon.ico''\\);console.log\\(''File size:'', buf.length, ''bytes''\\);console.log\\(''First bytes \\(hex\\):'', buf.slice\\(0,20\\).toString\\(''hex''\\)\\);\")",
+      "Bash(ls -la D:/Codex/autoSDMS/release/autoSDMS-0.3.1* D:/Codex/autoSDMS/release/latest.yml)",
+      "Bash(ls -la D:/Codex/autoSDMS/release/autoSDMS-0.3.3* D:/Codex/autoSDMS/release/latest.yml)",
+      "Bash(gh repo:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" https://api.github.com/repos/poohhw/autoSDMS/releases/latest)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''Tag:'''', d[''''tag_name'''']\\); print\\(''''Assets:''''\\); [print\\(f''''  - {a[\"\"name\"\"]} \\({a[\"\"size\"\"]//1024//1024}MB\\)''''\\) for a in d[''''assets'''']]\")",
+      "Bash(node -e \"let d='''''''';process.stdin.on\\(''''data'''',c=>d+=c\\);process.stdin.on\\(''''end'''',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\(''''Tag:'''',j.tag_name\\);console.log\\(''''Assets:''''\\);j.assets.forEach\\(a=>console.log\\(''''  -'''',a.name,''''\\(''''+Math.round\\(a.size/1024/1024\\)+''''MB\\)''''\\)\\)}\\)\")",
+      "Bash(timeout 180)"
     ]
   },
   "disableAllHooks": true

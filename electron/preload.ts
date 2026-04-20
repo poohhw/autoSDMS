@@ -2,10 +2,10 @@ import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("autosdms", {
   // Task execution
-  runDaily: (dateYmd: string, headed: boolean): Promise<unknown> =>
-    ipcRenderer.invoke("task:run-daily", dateYmd, headed),
-  runWeekly: (dateYmd: string, headed: boolean): Promise<unknown> =>
-    ipcRenderer.invoke("task:run-weekly", dateYmd, headed),
+  runDaily: (dateYmd: string, headed: boolean, leaveRequest?: boolean, slowMoMs?: number): Promise<unknown> =>
+    ipcRenderer.invoke("task:run-daily", dateYmd, headed, leaveRequest ?? false, slowMoMs ?? 0),
+  runWeekly: (dateYmd: string, headed: boolean, slowMoMs?: number): Promise<unknown> =>
+    ipcRenderer.invoke("task:run-weekly", dateYmd, headed, slowMoMs ?? 0),
 
   // Log streaming (main → renderer)
   onLog: (callback: (entry: { level: string; message: string; timestamp: string }) => void) => {
@@ -47,6 +47,14 @@ contextBridge.exposeInMainWorld("autosdms", {
   getVersion: (): Promise<string> =>
     ipcRenderer.invoke("app:version"),
 
+  // Bulk Complete
+  bulkComplete: (headed: boolean, slowMoMs?: number): Promise<unknown> =>
+    ipcRenderer.invoke("task:bulk-complete", headed, slowMoMs ?? 0),
+
+  // Cancel running task
+  cancelTask: (): Promise<{ cancelled: boolean }> =>
+    ipcRenderer.invoke("task:cancel"),
+
   // Auto Update
   checkUpdate: (): Promise<{ available: boolean; version?: string; reason?: string }> =>
     ipcRenderer.invoke("update:check"),
@@ -65,5 +73,8 @@ contextBridge.exposeInMainWorld("autosdms", {
   },
   onUpdateNotAvailable: (callback: () => void) => {
     ipcRenderer.on("update:not-available", () => callback());
+  },
+  onLogAppend: (callback: (entry: { level: string; message: string }) => void) => {
+    ipcRenderer.on("log:append", (_event, entry) => callback(entry));
   },
 });

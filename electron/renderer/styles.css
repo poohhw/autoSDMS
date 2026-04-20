@@ -61,6 +61,27 @@ body {
   color: var(--text-muted);
 }
 
+.btn-update-check {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: all 0.2s;
+}
+.btn-update-check:hover {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+.btn-update-check.checking {
+  animation: spin 1s linear infinite;
+  pointer-events: none;
+}
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
 .btn-link {
   display: flex;
   align-items: center;
@@ -161,6 +182,27 @@ body {
   accent-color: var(--primary);
 }
 
+.checkbox-group {
+  display: flex;
+  align-items: center;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  accent-color: var(--primary);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
 /* ===== Action Buttons ===== */
 .actions {
   display: flex;
@@ -203,6 +245,61 @@ body {
 
 .btn-weekly:hover:not(:disabled) {
   background: var(--success-hover);
+}
+
+.btn-complete {
+  background: #6366f1;
+  color: white;
+}
+
+.btn-complete:hover:not(:disabled) {
+  background: #4f46e5;
+}
+
+.btn-cancel {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-cancel:hover:not(:disabled) {
+  background: #c53030;
+}
+
+/* SlowMo control */
+.slowmo-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.slowmo-control input[type="range"] {
+  flex: 1;
+  max-width: 180px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.slowmo-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  min-width: 44px;
+  text-align: right;
+}
+
+.slowmo-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Cancel row: hidden by default, shown while running */
+.cancel-row {
+  display: none;
+}
+
+.cancel-row.visible {
+  display: flex;
 }
 
 /* Spinner */
@@ -355,11 +452,38 @@ body {
 .modal {
   background: var(--surface);
   border-radius: 12px;
-  padding: 24px;
+  padding: 24px 24px 16px;
   width: 480px;
   max-height: 80vh;
-  overflow-y: auto;
+  overflow: hidden;
   box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  display: flex;
+  flex-direction: column;
+}
+
+.modal > h2,
+.modal > p {
+  flex-shrink: 0;
+}
+
+.modal-scroll {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0 -24px;
+  padding: 0 24px;
+}
+
+/* manual-modal: .modal 기본 스타일을 완전히 재정의 */
+.modal-overlay .modal.manual-modal {
+  width: 520px;
+  height: 75vh;
+  max-height: 85vh;
+  padding: 0;
+  overflow: hidden;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal h2 {
@@ -735,20 +859,12 @@ body {
 }
 
 /* ===== Manual Modal ===== */
-.manual-modal {
-  width: 520px;
-  max-height: 85vh;
-  padding: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-
 .manual-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px 12px;
+  flex-shrink: 0;
 }
 
 .manual-header h2 {
@@ -781,10 +897,11 @@ body {
   gap: 4px;
   padding: 0 24px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .manual-tab {
-  padding: 10px 16px;
+  padding: 10px 12px;
   border: none;
   background: transparent;
   font-size: 13px;
@@ -809,11 +926,14 @@ body {
   display: none;
   padding: 20px 24px 24px;
   overflow-y: auto;
-  flex: 1;
 }
 
-.manual-content.active {
-  display: block;
+.modal-overlay .modal.manual-modal .manual-content.active {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .flow-title {
@@ -853,6 +973,30 @@ body {
 
 .flow-step.done:hover {
   background: #e6ffed;
+}
+
+.manual-note {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: #f7fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #4a5568;
+}
+
+.manual-note p {
+  margin-bottom: 8px;
+  font-size: 14px;
+}
+
+.manual-note ul {
+  margin-left: 20px;
+}
+
+.manual-note li {
+  margin-bottom: 4px;
+  line-height: 1.5;
 }
 
 .flow-icon {

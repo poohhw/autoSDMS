@@ -1,6 +1,6 @@
 {
   "name": "autosdms",
-  "version": "0.2.2",
+  "version": "0.6.3",
   "private": true,
   "type": "module",
   "main": "dist-electron/electron/main.js",
@@ -9,7 +9,7 @@
     "dev": "tsx src/main.ts",
     "register:otherwork": "tsx src/registerOtherWork.ts",
     "register:weekly": "tsx src/registerWeeklyReport.ts",
-    "electron:build-ts": "node -e \"const{execSync:r}=require('child_process');try{r('tsc -p tsconfig.electron.json',{stdio:'inherit'})}catch{};const fs=require('fs'),p=require('path');fs.writeFileSync('dist-electron/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n');const src='electron/renderer',dst='dist-electron/electron/renderer';fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src)){fs.copyFileSync(p.join(src,f),p.join(dst,f))}\"",
+    "electron:build-ts": "node -e \"const{execSync:r}=require('child_process');try{r('tsc -p tsconfig.electron.json',{stdio:'inherit'})}catch{};const fs=require('fs'),p=require('path');fs.writeFileSync('dist-electron/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n');const src='electron/renderer',dst='dist-electron/electron/renderer';fs.mkdirSync(dst,{recursive:true});for(const f of fs.readdirSync(src)){fs.copyFileSync(p.join(src,f),p.join(dst,f))};const ad='dist-electron/assets';fs.mkdirSync(ad,{recursive:true});if(fs.existsSync('assets')){for(const f of fs.readdirSync('assets')){fs.copyFileSync(p.join('assets',f),p.join(ad,f))}}\"",
     "electron:dev": "npm run electron:build-ts && electron dist-electron/electron/main.js",
     "electron:pack": "npm run electron:build-ts && electron-builder --win --dir",
     "electron:dist": "npm run electron:build-ts && electron-builder --win",
@@ -25,6 +25,7 @@
     },
     "files": [
       "dist-electron/**/*",
+      "assets/**/*",
       "node_modules/**/*",
       "!node_modules/.cache/**/*",
       "!node_modules/electron/**/*",
@@ -37,6 +38,7 @@
     ],
     "win": {
       "target": "nsis",
+      "icon": "assets/icon.png",
       "signAndEditExecutable": false,
       "signtoolOptions": null
     },
@@ -50,7 +52,7 @@
     },
     "publish": [{
       "provider": "github",
-      "owner": "hwjeong",
+      "owner": "poohhw",
       "repo": "autoSDMS"
     }],
     "asar": false

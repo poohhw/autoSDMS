@@ -10,6 +10,11 @@ function sanitizeForErp(text: string): string {
     .replace(/[\u200B\u200C\u200D\uFEFF]/g, "");          // zero-width chars → remove
 }
 
+export interface NotionAttachment {
+  name: string;
+  url: string;
+}
+
 export interface OtherWorkDraft {
   notionPageId: string;
   title: string;
@@ -27,6 +32,7 @@ export interface OtherWorkDraft {
   project?: string;
   sdmsCategoryRef?: string;
   progressRate?: string; // 예정률 (예: "100%", "80%")
+  attachments?: NotionAttachment[]; // 노션 첨부파일
 }
 
 type NotionProperty = Record<string, unknown>;
@@ -157,6 +163,29 @@ function readRollup(prop: NotionProperty): string {
   }
 
   return "";
+}
+
+function readFiles(prop: NotionProperty): NotionAttachment[] {
+  const files = asArray(prop["files"]);
+  return files
+    .map((f) => {
+      if (typeof f !== "object" || f === null) return null;
+      const file = f as Record<string, unknown>;
+      const name = typeof file["name"] === "string" ? file["name"] : "attachment";
+      const type = file["type"];
+      if (type === "file") {
+        const inner = file["file"] as Record<string, unknown> | undefined;
+        const url = typeof inner?.["url"] === "string" ? inner["url"] : "";
+        return url ? { name, url } : null;
+      }
+      if (type === "external") {
+        const inner = file["external"] as Record<string, unknown> | undefined;
+        const url = typeof inner?.["url"] === "string" ? inner["url"] : "";
+        return url ? { name, url } : null;
+      }
+      return null;
+    })
+    .filter((x): x is NotionAttachment => x !== null);
 }
 
 function readValue(prop: NotionProperty): string {
@@ -312,6 +341,14 @@ export function mapNotionPagesToOtherWorkDrafts(pages: Array<Record<string, unkn
       continue;
     }
 
+    // 첨부파일 추출 (files 타입 프로퍼티)
+    const attachments: NotionAttachment[] = [];
+    for (const prop of Object.values(properties)) {
+      if (prop["type"] === "files") {
+        attachments.push(...readFiles(prop));
+      }
+    }
+
     drafts.push({
       notionPageId,
       title,
@@ -320,7 +357,7 @@ export function mapNotionPagesToOtherWorkDrafts(pages: Array<Record<string, unkn
       project: pick(properties, ["프로젝트", "Project"]),
       priority: pick(properties, ["중요도", "Priority"]),
       status: pick(properties, ["상태", "Status"]),
-      sdmsCategoryRef: pick(properties, ["SDMS 분류사전", "분류키워드"]),
+      sdmsCategoryRef: pick(properties, ["기타업무 분류사전", "SDMS 분류사전", "분류키워드"]),
       workType: pick(properties, ["분류", "업무 분류"]),
       workDetail: pick(properties, ["분류상세", "업무 분류상세"]),
       useSolution: pickCheckbox(properties, ["솔루션 사용", "솔루션체크", "솔루션 사용 여부"]),
@@ -328,7 +365,8 @@ export function mapNotionPagesToOtherWorkDrafts(pages: Array<Record<string, unkn
       addSprint: pickCheckbox(properties, ["스프린트", "스프린트 체크"]),
       pmEmpNumber: pick(properties, ["담당자", "담당자 사번", "PM"]),
       finishDate,
-      progressRate: pick(properties, ["예정률", "예정률(%)", "진행률", "Progress Rate"]) || undefined
+      progressRate: pick(properties, ["예정률", "예정률(%)", "진행률", "Progress Rate"]) || undefined,
+      attachments: attachments.length > 0 ? attachments : undefined,
     });
   }
 

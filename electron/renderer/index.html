@@ -17,6 +17,7 @@
           Notion
         </button>
         <span class="version" id="appVersion">v0.0.0</span>
+        <button class="btn-update-check" id="btnCheckUpdate" type="button" title="업데이트 확인">🔄</button>
       </div>
     </div>
 
@@ -47,6 +48,20 @@
           <label><input type="radio" name="browserMode" value="headed" /> 표시 (디버깅)</label>
         </div>
       </div>
+      <div class="control-row slowmo-row" id="slowmoRow" style="display:none;">
+        <label>입력 지연</label>
+        <div class="slowmo-control">
+          <input type="range" id="slowmoSlider" min="0" max="2000" step="100" value="0" />
+          <span class="slowmo-value" id="slowmoValue">0ms</span>
+          <span class="slowmo-hint">(디버깅용: 각 입력 동작 사이 대기 시간)</span>
+        </div>
+      </div>
+      <div class="control-row">
+        <label>옵션</label>
+        <div class="checkbox-group">
+          <label class="checkbox-label"><input type="checkbox" id="chkLeaveRequest" checked /> 🏖️ 휴가계 자동 작성 (연차/반차 항목 감지 시)</label>
+        </div>
+      </div>
       <div class="actions">
         <button class="btn btn-daily" id="btnDaily" type="button">
           <span class="spinner"></span>
@@ -55,6 +70,15 @@
         <button class="btn btn-weekly" id="btnWeekly" type="button">
           <span class="spinner"></span>
           주간 업무등록
+        </button>
+        <button class="btn btn-complete" id="btnBulkComplete" type="button">
+          <span class="spinner"></span>
+          ✅ 기타업무 일괄 완료
+        </button>
+      </div>
+      <div class="cancel-row" id="cancelRow">
+        <button class="btn btn-cancel" id="btnCancel" type="button">
+          ⏹ 취소
         </button>
       </div>
     </div>
@@ -90,6 +114,7 @@
       <h2>환경변수 설정</h2>
       <p>ERP 및 Notion 연동에 필요한 정보를 입력하세요.</p>
 
+      <div class="modal-scroll">
       <div class="form-group">
         <label>Notion ID (이메일)</label>
         <input type="text" id="envNotionId" placeholder="example@email.com" />
@@ -148,6 +173,16 @@
         </button>
       </div>
 
+      <hr style="border:none;border-top:1px solid #e2e8f0;margin:16px 0;" />
+
+      <div class="form-group">
+        <label>GitHub Token (자동 업데이트용)</label>
+        <input type="password" id="envGhToken" placeholder="github_pat_..." />
+        <span class="form-hint">자동 업데이트에 필요합니다. 관리자에게 전달받은 토큰을 입력하세요.</span>
+      </div>
+
+      </div><!-- /.modal-scroll -->
+
       <div class="modal-actions">
         <button class="btn-modal secondary" id="btnModalCancel" type="button">취소</button>
         <button class="btn-modal primary" id="btnModalSave" type="button">저장</button>
@@ -176,6 +211,7 @@
       <div class="manual-tabs">
         <button class="manual-tab active" data-tab="daily" type="button">📋 일일업무등록</button>
         <button class="manual-tab" data-tab="weekly" type="button">📊 주간 업무등록</button>
+        <button class="manual-tab" data-tab="update" type="button">🔄 자동 업데이트</button>
       </div>
 
       <!-- 일일업무등록 -->
@@ -297,6 +333,62 @@
               <span>주차가 드롭다운에 없는 경우 자동 skip</span>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+      <!-- 자동 업데이트 -->
+      <div class="manual-content" id="manualUpdate">
+        <div class="flow-title">자동 업데이트 안내</div>
+        <div class="flow-chart">
+          <div class="flow-step">
+            <div class="flow-icon">🚀</div>
+            <div class="flow-text">
+              <b>1. 앱 실행</b>
+              <span>앱이 시작되면 5초 후 자동으로 새 버전이 있는지 확인합니다</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">🔔</div>
+            <div class="flow-text">
+              <b>2. 업데이트 알림</b>
+              <span>새 버전이 발견되면 상단에 파란색 알림 배너가 표시됩니다</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">⬇️</div>
+            <div class="flow-text">
+              <b>3. 다운로드</b>
+              <span>[다운로드] 버튼을 클릭하면 백그라운드에서 업데이트 파일을 받습니다</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">
+            <div class="flow-icon">🔄</div>
+            <div class="flow-text">
+              <b>4. 재시작</b>
+              <span>다운로드 완료 후 [재시작] 버튼을 클릭하면 자동으로 업데이트가 적용됩니다</span>
+            </div>
+          </div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step done">
+            <div class="flow-icon">✅</div>
+            <div class="flow-text">
+              <b>완료</b>
+              <span>앱이 재시작되며 최신 버전으로 업데이트됩니다</span>
+            </div>
+          </div>
+        </div>
+        <div class="manual-note">
+          <p>💡 <b>참고사항</b></p>
+          <ul>
+            <li>업데이트는 인터넷 연결이 필요합니다</li>
+            <li>업데이트 중에도 기존 기능은 정상적으로 사용할 수 있습니다</li>
+            <li>환경변수 설정은 업데이트 후에도 유지됩니다</li>
+            <li>알림 배너의 <b>×</b> 버튼으로 알림을 닫을 수 있습니다</li>
+          </ul>
         </div>
       </div>
     </div>

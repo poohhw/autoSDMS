@@ -155,4 +155,32 @@ export class NotionDailyFetcher {
 
     return pages;
   }
+
+  /** Relation 페이지 ID로 제목(title) 텍스트를 조회 */
+  async getPageTitle(pageId: string): Promise<string> {
+    try {
+      const page = await (this.client.pages as any).retrieve({ page_id: pageId });
+      const props = page.properties as Record<string, any>;
+      // title 타입 속성 찾기
+      for (const val of Object.values(props)) {
+        if (val.type === "title" && Array.isArray(val.title)) {
+          return val.title.map((t: any) => t.plain_text || "").join("").trim();
+        }
+      }
+      return "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** 여러 Relation ID를 한번에 제목으로 변환 (캐시 적용) */
+  async resolveRelationIds(ids: string[]): Promise<Map<string, string>> {
+    const result = new Map<string, string>();
+    const uniqueIds = [...new Set(ids.filter(Boolean))];
+    for (const id of uniqueIds) {
+      const title = await this.getPageTitle(id);
+      result.set(id, title);
+    }
+    return result;
+  }
 }

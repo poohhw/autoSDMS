@@ -18,8 +18,14 @@ const datePicker = /** @type {HTMLInputElement} */ (document.getElementById("dat
 const dayBadge = document.getElementById("dayBadge");
 const btnDaily = document.getElementById("btnDaily");
 const btnWeekly = document.getElementById("btnWeekly");
+const btnBulkComplete = document.getElementById("btnBulkComplete");
 const logPanel = document.getElementById("logPanel");
 const statusText = document.getElementById("statusText");
+const btnCancel = document.getElementById("btnCancel");
+const cancelRow = document.getElementById("cancelRow");
+const slowmoRow = document.getElementById("slowmoRow");
+const slowmoSlider = /** @type {HTMLInputElement} */ (document.getElementById("slowmoSlider"));
+const slowmoValue = document.getElementById("slowmoValue");
 const btnClearLog = document.getElementById("btnClearLog");
 const btnOpenLogs = document.getElementById("btnOpenLogs");
 const btnOpenArtifacts = document.getElementById("btnOpenArtifacts");
@@ -39,7 +45,8 @@ const ENV_FIELDS = {
   NOTION_DATABASE_ID: "envNotionDbId",
   COMPANY_ID: "envCompanyId",
   COMPANY_PASSWORD: "envCompanyPw",
-  EMPLOYEE_NAME: "envEmployeeName"
+  EMPLOYEE_NAME: "envEmployeeName",
+  GH_TOKEN: "envGhToken"
 };
 
 let isRunning = false;
@@ -152,6 +159,22 @@ function updateDayBadge() {
 
 datePicker.addEventListener("change", updateDayBadge);
 
+// --- SlowMo slider ---
+document.querySelectorAll('input[name="browserMode"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    const headed = getHeaded();
+    slowmoRow.style.display = headed ? "" : "none";
+  });
+});
+
+slowmoSlider.addEventListener("input", () => {
+  slowmoValue.textContent = `${slowmoSlider.value}ms`;
+});
+
+function getSlowMo() {
+  return getHeaded() ? Number(slowmoSlider.value) : 0;
+}
+
 /** 환경변수 미설정 시 등록 버튼 비활성화 */
 function updateButtonStates() {
   if (!envValid) {
@@ -186,16 +209,35 @@ function setRunning(running, buttonEl) {
   isRunning = running;
   btnDaily.disabled = running;
   btnWeekly.disabled = running;
+  btnBulkComplete.disabled = running;
   if (running) {
     buttonEl.classList.add("loading");
     statusText.textContent = "실행 중...";
     statusText.className = "status-text running";
+    cancelRow.classList.add("visible");
+    btnCancel.disabled = false;
   } else {
     btnDaily.classList.remove("loading");
     btnWeekly.classList.remove("loading");
+    btnBulkComplete.classList.remove("loading");
+    cancelRow.classList.remove("visible");
+    btnCancel.disabled = false;
+    btnCancel.textContent = "⏹ 취소";
     updateButtonStates();
   }
 }
+
+// Cancel
+btnCancel.addEventListener("click", async () => {
+  btnCancel.disabled = true;
+  btnCancel.textContent = "취소 중...";
+  appendLog("warn", "=== 취소 요청 중... ===");
+  try {
+    await window.autosdms.cancelTask();
+  } catch (err) {
+    appendLog("error", `취소 오류: ${err}`);
+  }
+});
 
 function getHeaded() {
   const radio = /** @type {HTMLInputElement} */ (
@@ -217,9 +259,15 @@ btnDaily.addEventListener("click", async () => {
   appendLog("info", `=== 일일업무등록 시작 (${dateYmd}) ===`);
 
   try {
-    const result = await window.autosdms.runDaily(dateYmd, getHeaded());
+    const chkLeave = /** @type {HTMLInputElement} */ (document.getElementById("chkLeaveRequest"));
+    const leaveRequest = chkLeave?.checked ?? false;
+    const result = await window.autosdms.runDaily(dateYmd, getHeaded(), leaveRequest, getSlowMo());
 
-    if (result && result.success) {
+    if (result && result.cancelled) {
+      appendLog("warn", "=== 일일업무등록 취소됨 ===");
+      statusText.textContent = "취소됨";
+      statusText.className = "status-text";
+    } else if (result && result.success) {
       appendLog("result", "=== 일일업무등록 완료 ===");
       statusText.textContent = "일일등록 완료";
       statusText.className = "status-text success";
@@ -236,7 +284,7 @@ btnDaily.addEventListener("click", async () => {
         if (yes) {
           setRunning(true, btnWeekly);
           appendLog("info", `=== 주간 업무등록 연속 실행 (${dateYmd}) ===`);
-          const weekResult = await window.autosdms.runWeekly(dateYmd, getHeaded());
+          const weekResult = await window.autosdms.runWeekly(dateYmd, getHeaded(), getSlowMo());
           if (weekResult && weekResult.success) {
             appendLog("result", "=== 주간 업무등록 완료 ===");
             statusText.textContent = "일일 + 주간 등록 완료";
@@ -275,8 +323,12 @@ btnWeekly.addEventListener("click", async () => {
   appendLog("info", `=== 주간 업무등록 시작 (${dateYmd}) ===`);
 
   try {
-    const result = await window.autosdms.runWeekly(dateYmd, getHeaded());
-    if (result && result.success) {
+    const result = await window.autosdms.runWeekly(dateYmd, getHeaded(), getSlowMo());
+    if (result && result.cancelled) {
+      appendLog("warn", "=== 주간 업무등록 취소됨 ===");
+      statusText.textContent = "취소됨";
+      statusText.className = "status-text";
+    } else if (result && result.success) {
       appendLog("result", "=== 주간 업무등록 완료 ===");
       statusText.textContent = "주간 등록 완료";
       statusText.className = "status-text success";
@@ -291,6 +343,40 @@ btnWeekly.addEventListener("click", async () => {
     statusText.className = "status-text error";
   } finally {
     setRunning(false, btnWeekly);
+  }
+});
+
+// Bulk Complete
+btnBulkComplete.addEventListener("click", async () => {
+  if (isRunning || !envValid) return;
+
+  const confirmed = await showConfirm("기타업무를 일괄 완료 처리하시겠습니까?", { title: "기타업무 일괄 완료" });
+  if (!confirmed) return;
+
+  setRunning(true, btnBulkComplete);
+  appendLog("info", "=== 기타업무 일괄 완료 시작 ===");
+
+  try {
+    const result = await window.autosdms.bulkComplete(getHeaded(), getSlowMo());
+    if (result && result.cancelled) {
+      appendLog("warn", "=== 기타업무 일괄 완료 취소됨 ===");
+      statusText.textContent = "취소됨";
+      statusText.className = "status-text";
+    } else if (result && result.success) {
+      appendLog("result", `=== 기타업무 일괄 완료 (${result.completed || 0}건 완료, ${result.alreadyDone || 0}건 이미 완료) ===`);
+      statusText.textContent = "일괄 완료 처리 완료";
+      statusText.className = "status-text success";
+    } else {
+      appendLog("error", `일괄 완료 실패: ${result?.error || "알 수 없는 오류"}`);
+      statusText.textContent = "처리 실패";
+      statusText.className = "status-text error";
+    }
+  } catch (err) {
+    appendLog("error", `오류: ${err}`);
+    statusText.textContent = "오류 발생";
+    statusText.className = "status-text error";
+  } finally {
+    setRunning(false, btnBulkComplete);
   }
 });
 
@@ -348,15 +434,16 @@ btnModalSave.addEventListener("click", async () => {
   // 빈 값 검증
   const emptyFields = [];
   const values = {};
+  const OPTIONAL_KEYS = ["GH_TOKEN"];
   for (const [envKey, elemId] of Object.entries(ENV_FIELDS)) {
     const input = /** @type {HTMLInputElement} */ (document.getElementById(elemId));
     const val = input.value.trim();
-    if (!val) {
+    if (!val && !OPTIONAL_KEYS.includes(envKey)) {
       emptyFields.push(envKey);
       input.classList.add("missing");
     } else {
       input.classList.remove("missing");
-      values[envKey] = val;
+      if (val) values[envKey] = val;
     }
   }
 
@@ -494,7 +581,7 @@ const manualModal = document.getElementById("manualModal");
 const btnManual = document.getElementById("btnManual");
 const btnManualClose = document.getElementById("btnManualClose");
 const manualTabs = document.querySelectorAll(".manual-tab");
-const manualContents = { daily: document.getElementById("manualDaily"), weekly: document.getElementById("manualWeekly") };
+const manualContents = { daily: document.getElementById("manualDaily"), weekly: document.getElementById("manualWeekly"), update: document.getElementById("manualUpdate") };
 
 btnManual.addEventListener("click", () => {
   manualModal.classList.add("active");
@@ -513,7 +600,7 @@ manualTabs.forEach((tab) => {
     manualTabs.forEach((t) => t.classList.remove("active"));
     tab.classList.add("active");
     const target = tab.getAttribute("data-tab");
-    Object.values(manualContents).forEach((c) => c.classList.remove("active"));
+    Object.values(manualContents).forEach((c) => { if (c) c.classList.remove("active"); });
     if (manualContents[target]) manualContents[target].classList.add("active");
   });
 });
@@ -523,6 +610,7 @@ const btnNotionTokenIssue = document.getElementById("btnNotionTokenIssue");
 btnNotionTokenIssue.addEventListener("click", () => {
   window.autosdms.openExternal("https://www.notion.so/profile/integrations");
 });
+
 
 // --- Notion Link ---
 const btnOpenNotion = document.getElementById("btnOpenNotion");
@@ -554,6 +642,13 @@ initDate();
 
   // --- Auto Update ---
   setupAutoUpdater();
+
+  // --- Main Process Log → UI Log ---
+  if (window.autosdms.onLogAppend) {
+    window.autosdms.onLogAppend((entry) => {
+      appendLog(entry.level || "info", entry.message);
+    });
+  }
 })();
 
 function setupAutoUpdater() {
@@ -588,7 +683,12 @@ function setupAutoUpdater() {
   });
 
   window.autosdms.onUpdateNotAvailable(() => {
-    // 조용히 패스
+    // 수동 체크 시에만 알림
+    const checkBtn = document.getElementById("btnCheckUpdate");
+    if (checkBtn && checkBtn.classList.contains("checking")) {
+      checkBtn.classList.remove("checking");
+      appendLog("info", "[UPDATER] 현재 최신 버전입니다.");
+    }
   });
 
   actionBtn.addEventListener("click", async () => {
@@ -605,4 +705,20 @@ function setupAutoUpdater() {
   dismissBtn.addEventListener("click", () => {
     banner.style.display = "none";
   });
+
+  // 수동 업데이트 확인 버튼
+  const checkBtn = document.getElementById("btnCheckUpdate");
+  if (checkBtn) {
+    checkBtn.addEventListener("click", async () => {
+      checkBtn.classList.add("checking");
+      appendLog("info", "[UPDATER] 업데이트 확인 중...");
+      try {
+        await window.autosdms.checkUpdate();
+        // 결과는 onUpdateAvailable / onUpdateNotAvailable 콜백으로 처리됨
+      } catch (err) {
+        appendLog("error", `[UPDATER] 확인 실패: ${err.message || err}`);
+        checkBtn.classList.remove("checking");
+      }
+    });
+  }
 }

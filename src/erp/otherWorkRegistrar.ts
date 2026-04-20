@@ -1,10 +1,15 @@
 import fs from "node:fs";
+import https from "node:https";
+import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { chromium, type BrowserContext, type Page } from "playwright";
 import type { CompanyEnv } from "../config/env.js";
 import { getIsoWeekNumber } from "../domain/businessDay.js";
 import type { WeeklyProjectSummary } from "../domain/weeklyReport.js";
+import { checkSignal } from "../lib/cancellation.js";
 import type { OtherWorkDraft } from "../notion/otherWorkMapper.js";
+import { detectLeaveType, registerLeaveRequest } from "./leaveRequestRegistrar.js";
 
 const OTHER_WORK_URL = "http://erp.gcsc.co.kr/Agile/IssuePims/OtherWork.aspx";
 const DAILY_SCRUM_URL = "http://erp.gcsc.co.kr/Agile/Agile/DailyScrum.aspx";
@@ -404,6 +409,81 @@ export class ErpOtherWorkRegistrar {
     return { closed: true, warning, sprintWarningHandled: true };
   }
 
+  /** URL에서 파일을 %TEMP% 폴더에 다운로드 후 경로 반환 */
+  private downloadFile(url: string, fileName: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const safeFileName = fileName.replace(/[\\/:*?"<>|]/g, "_");
+      const destPath = path.join(os.tmpdir(), `autosdms_${Date.now()}_${safeFileName}`);
+      const file = fs.createWriteStream(destPath);
+      const protocol = url.startsWith("https") ? https : http;
+      protocol.get(url, (res) => {
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          file.close();
+          fs.unlinkSync(destPath);
+          resolve(this.downloadFile(res.headers.location, fileName));
+          return;
+        }
+        res.pipe(file);
+        file.on("finish", () => file.close(() => resolve(destPath)));
+        file.on("error", (err) => { fs.unlinkSync(destPath); reject(err); });
+      }).on("error", (err) => { fs.unlinkSync(destPath); reject(err); });
+    });
+  }
+
+  /** 팝업에서 첨부파일 업로드 */
+  private async uploadAttachments(popup: Page, item: OtherWorkDraft): Promise<void> {
+    if (!item.attachments || item.attachments.length === 0) return;
+
+    // 파일 업로드 영역 펼치기
+    await popup.evaluate(() => {
+      const el = document.getElementById("fileUpLoad_pnl_addFile") as HTMLElement | null;
+      if (el) el.click();
+    });
+    await popup.waitForTimeout(800);
+
+    // 기존 첨부파일 삭제 (서버 세션 캐시로 이전 파일이 남아있을 수 있음)
+    const fileCount = await popup.evaluate(() =>
+      document.querySelectorAll("[id='fileUpLoad_btn_delete']").length
+    );
+    console.log(`[OTHER-WORK] 기존 첨부파일 ${fileCount}개 삭제 시작`);
+    for (let i = 0; i < fileCount; i++) {
+      await popup.evaluate(() => {
+        const el = document.querySelector("[id='fileUpLoad_btn_delete']") as HTMLElement | null;
+        if (el) el.click();
+      });
+      await popup.waitForLoadState("networkidle").catch(() => undefined);
+      await popup.waitForTimeout(300);
+    }
+
+    for (const attachment of item.attachments) {
+      let tempPath: string | null = null;
+      try {
+        console.log(`[OTHER-WORK] 첨부파일 다운로드: "${attachment.name}"`);
+        tempPath = await this.downloadFile(attachment.url, attachment.name);
+
+        // input[type="file"] 에 직접 파일 경로 주입
+        const fileInput = popup.locator("input[type='file']").first();
+        await fileInput.setInputFiles(tempPath);
+        await popup.waitForTimeout(500);
+
+        await popup.evaluate(() => {
+          const btn = document.getElementById("fileUpLoad_btn_add") as HTMLElement | null;
+          if (btn) btn.click();
+        });
+        await popup.waitForLoadState("networkidle").catch(() => undefined);
+        await popup.waitForTimeout(500);
+
+        console.log(`[OTHER-WORK] 첨부파일 업로드 완료: "${attachment.name}"`);
+      } catch (err) {
+        console.log(`[OTHER-WORK] 첨부파일 업로드 실패 "${attachment.name}": ${err instanceof Error ? err.message : err}`);
+      } finally {
+        if (tempPath && fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      }
+    }
+  }
+
   private async openInsertPopup(context: BrowserContext, mainPage: Page): Promise<Page> {
     const popupPromise = context.waitForEvent("page", { timeout: 10000 }).catch(() => null);
     await mainPage.click("#ctl00_AgileContents_btn_PairInsert");
@@ -448,6 +528,10 @@ export class ErpOtherWorkRegistrar {
     }
 
     await popup.fill("#txt_finishdate_txt_date", item.finishDate);
+
+    // 첨부파일 업로드 (PostBack으로 폼이 리셋되므로 workcomment 입력 전에 처리)
+    await this.uploadAttachments(popup, item);
+
     await popup.fill("#txt_workcomment", this.truncateComment(item.workComment, item.title));
     await popup.waitForTimeout(PRE_SUBMIT_DELAY_MS);
 
@@ -842,42 +926,86 @@ export class ErpOtherWorkRegistrar {
       fullPage: true
     });
 
-    // 4. 기존 등록된 행 감지 (삭제 버튼 기준)
+    // 4. 기존 등록된 행 감지 (삭제 버튼 → 수정 버튼 순으로 탐색)
     const existingRows = await formPage.evaluate(() => {
-      const rows: Array<{ rowId: string; projectText: string }> = [];
+      const rows: Array<{ rowId: string; projectText: string; hasDeleteBtn: boolean }> = [];
+      const seen = new Set<string>();
+
+      // 삭제 버튼으로 탐색
       const deleteBtns = document.querySelectorAll("[id*='btnl_deleteBusiness']");
       for (const btn of deleteBtns) {
         const match = btn.id.match(/(.+)_btnl_deleteBusiness/);
         if (!match) continue;
         const rowId = match[1];
+        if (seen.has(rowId)) continue;
+        seen.add(rowId);
         const tr = btn.closest("tr");
         if (!tr) continue;
         const tds = tr.querySelectorAll("td");
         const projectText = (tds[0]?.textContent?.trim() ?? "").replace(/\s+/g, "");
         if (projectText) {
-          rows.push({ rowId, projectText });
+          rows.push({ rowId, projectText, hasDeleteBtn: true });
         }
       }
+
+      // 삭제 버튼이 없으면 수정 버튼으로 탐색
+      if (rows.length === 0) {
+        const modifyBtns = document.querySelectorAll("[id*='btnl_modifyBusiness']");
+        for (const btn of modifyBtns) {
+          const match = btn.id.match(/(.+)_btnl_modifyBusiness/);
+          if (!match) continue;
+          const rowId = match[1];
+          if (seen.has(rowId)) continue;
+          seen.add(rowId);
+          const tr = btn.closest("tr");
+          if (!tr) continue;
+          const tds = tr.querySelectorAll("td");
+          const projectText = (tds[0]?.textContent?.trim() ?? "").replace(/\s+/g, "");
+          if (projectText) {
+            rows.push({ rowId, projectText, hasDeleteBtn: false });
+          }
+        }
+      }
+
       return rows;
     }).catch(() => []);
 
     console.log(`[BUSINESS-LOG] Existing rows: ${existingRows.length}`);
     for (const row of existingRows) {
-      console.log(`[BUSINESS-LOG]   ${row.rowId}: project="${row.projectText.substring(0, 40)}..."`);
+      console.log(`[BUSINESS-LOG]   ${row.rowId}: project="${row.projectText.substring(0, 40)}..." deleteBtn=${row.hasDeleteBtn}`);
     }
 
     // 5. 기존 행 모두 삭제 (역순으로 — 행 번호 변동 방지)
-    if (existingRows.length > 0) {
-      console.log(`[BUSINESS-LOG] Deleting ${existingRows.length} existing row(s)...`);
-      // dialog 핸들러 등록 (삭제 시 alert 자동 확인)
-      formPage.on("dialog", async (dialog) => {
-        console.log(`[BUSINESS-LOG] Dialog: ${dialog.message()}`);
-        await dialog.accept().catch(() => undefined);
-      });
+    const deletableRows = existingRows.filter((r) => r.hasDeleteBtn);
+    if (deletableRows.length > 0) {
+      console.log(`[BUSINESS-LOG] Deleting ${deletableRows.length} existing row(s)...`);
 
-      for (const row of [...existingRows].reverse()) {
+      for (const row of [...deletableRows].reverse()) {
         console.log(`[BUSINESS-LOG] Deleting ${row.rowId}...`);
-        await formPage.click(`#${row.rowId}_btnl_deleteBusiness`);
+
+        // confirm()을 자동 수락하고, JS로 직접 클릭 (td intercept 회피)
+        const deleted = await formPage.evaluate((rid) => {
+          // confirm을 일시적으로 오버라이드하여 자동 true 반환
+          const origConfirm = window.confirm;
+          window.confirm = () => true;
+          try {
+            const btn = document.getElementById(`${rid}_btnl_deleteBusiness`);
+            if (btn) {
+              (btn as HTMLElement).click();
+              return true;
+            }
+            return false;
+          } finally {
+            // confirm 복원
+            setTimeout(() => { window.confirm = origConfirm; }, 500);
+          }
+        }, row.rowId);
+
+        if (!deleted) {
+          console.log(`[BUSINESS-LOG] WARNING: Could not find delete button for ${row.rowId}. Skipping.`);
+          continue;
+        }
+
         await formPage.waitForLoadState("networkidle").catch(() => undefined);
         await formPage.waitForTimeout(1500);
         console.log(`[BUSINESS-LOG] Deleted ${row.rowId}`);
@@ -1172,9 +1300,15 @@ export class ErpOtherWorkRegistrar {
       // 5-1. Click 업무 textbox to open findScrumWork popup
       let t0 = Date.now();
       console.log(`[DAILY-SCRUM] Clicking 업무 textbox to open findScrumWork...`);
-      const findWorkPopupPromise = scrumPopup.waitForEvent("popup", { timeout: 15000 });
-      await scrumPopup.click("#txt_ToName");
-      const findWorkPopup = await findWorkPopupPromise;
+      let findWorkPopup;
+      try {
+        const findWorkPopupPromise = scrumPopup.waitForEvent("popup", { timeout: 15000 });
+        await scrumPopup.click("#txt_ToName");
+        findWorkPopup = await findWorkPopupPromise;
+      } catch {
+        console.log(`[DAILY-SCRUM] WARNING: findScrumWork popup not opened for "${erpTitle}". Skipping.`);
+        continue;
+      }
       console.log(`[DAILY-SCRUM][TIME] popup detected: ${Date.now() - t0}ms`);
 
       t0 = Date.now();
@@ -1275,7 +1409,8 @@ export class ErpOtherWorkRegistrar {
     context: BrowserContext,
     mainPage: Page,
     summaries: WeeklyProjectSummary[],
-    weekDate: Date
+    weekDate: Date,
+    signal?: AbortSignal
   ): Promise<void> {
     console.log(`[WEEKLY-REPORT] Navigating to BusinessReport page...`);
     await mainPage.goto(WEEKLY_REPORT_URL, { waitUntil: "domcontentloaded" });
@@ -1368,6 +1503,7 @@ export class ErpOtherWorkRegistrar {
 
     // ── 1) 기존 행 수정 ──
     for (const { summary, rowId } of updateItems) {
+      checkSignal(signal);
       console.log(`[WEEKLY-REPORT] Modifying ${rowId}: "${summary.project}"`);
 
       // 수정 버튼 클릭
@@ -1378,7 +1514,7 @@ export class ErpOtherWorkRegistrar {
 
       // 진행업무 textarea: 기존 내용 삭제 후 새 내용 입력
       const progressSelector = `#${rowId}_txt_progressWork_txt`;
-      const progressText = summary.items.map((item) => `- ${item}`).join("\n");
+      const progressText = summary.items.join("\n");
       await reportPopup.evaluate((sel) => {
         const el = document.querySelector(sel) as HTMLTextAreaElement;
         if (el) el.value = "";
@@ -1395,6 +1531,7 @@ export class ErpOtherWorkRegistrar {
 
     // ── 2) 신규 등록 ──
     for (let i = 0; i < newItems.length; i++) {
+      checkSignal(signal);
       const summary = newItems[i];
       console.log(`[WEEKLY-REPORT] (${i + 1}/${newItems.length}) NEW Project: "${summary.project}"`);
 
@@ -1456,7 +1593,7 @@ export class ErpOtherWorkRegistrar {
       await reportPopup.waitForTimeout(500);
 
       // 3. 진행업무 입력
-      const progressText = summary.items.map((item) => `- ${item}`).join("\n");
+      const progressText = summary.items.join("\n");
       console.log(`[WEEKLY-REPORT] Filling 진행업무 (${summary.items.length} items)`);
       await reportPopup.fill("#txt_progressWorkInsert_txt", progressText);
 
@@ -1491,7 +1628,7 @@ export class ErpOtherWorkRegistrar {
   /**
    * 주간 업무보고 단독 실행 (로그인 → 주간보고 등록 → 브라우저 종료)
    */
-  async registerWeeklyStandalone(summaries: WeeklyProjectSummary[], weekDate: Date): Promise<void> {
+  async registerWeeklyStandalone(summaries: WeeklyProjectSummary[], weekDate: Date, signal?: AbortSignal): Promise<void> {
     const channel = await detectBrowserChannel();
     console.log(`[BROWSER] Using ${channel}`);
     const browser = await chromium.launch({
@@ -1504,14 +1641,154 @@ export class ErpOtherWorkRegistrar {
 
     try {
       await this.login(page);
-      await this.registerWeeklyReport(context, page, summaries, weekDate);
+      checkSignal(signal);
+      await this.registerWeeklyReport(context, page, summaries, weekDate, signal);
     } finally {
       await context.close();
       await browser.close();
     }
   }
 
-  async register(items: OtherWorkDraft[], options?: { keepOpen?: boolean; dateYmd?: string; yesterdayItems?: OtherWorkDraft[] }): Promise<RegisterSummary> {
+  private async registerSprintBacklog(
+    context: BrowserContext,
+    mainPage: Page,
+    items: OtherWorkDraft[]
+  ): Promise<void> {
+    const SPRINT_BACKLOG_URL = "http://erp.gcsc.co.kr/Agile/Agile/SprintBackLog.aspx";
+    const COMPLETE_SPRINT_BASE = "http://erp.gcsc.co.kr/Agile/Agile/completeSprint.aspx";
+
+    console.log("[SPRINT-BACKLOG] Navigating to SprintBackLog...");
+    await mainPage.goto(SPRINT_BACKLOG_URL, { waitUntil: "domcontentloaded" });
+    await mainPage.waitForLoadState("networkidle");
+
+    // 1. 최신 스프린트 선택 (마지막 옵션)
+    const sprintOptions = await mainPage.$$eval(
+      "#ctl00_AgileContents_ddl_SprintCode option",
+      opts => opts.map(o => ({ value: (o as HTMLOptionElement).value, text: o.textContent?.trim() ?? "" }))
+        .filter(o => o.value)
+    );
+    if (sprintOptions.length === 0) {
+      console.log("[SPRINT-BACKLOG] No sprint options found. Skipping.");
+      return;
+    }
+    // finishDate 기준 주차 코드(26W15 등) 계산 후 매칭 스프린트 선택
+    // 없으면 오늘 이전 스프린트 중 가장 최근 것 선택
+    const today = new Date();
+    const finishDate = items[0]?.finishDate
+      ? new Date(`${items[0].finishDate}T00:00:00`)
+      : today;
+    const yy = String(finishDate.getFullYear()).slice(-2);
+    const ww = String(getIsoWeekNumber(finishDate)).padStart(2, "0");
+    const targetWeekPrefix = `${yy}W${ww}`;
+
+    const realSprints = sprintOptions.filter(o => /^\d{2}W\d+/.test(o.value));
+    // 1순위: finishDate 주차와 일치하는 스프린트
+    const exactMatch = realSprints.find(o => o.value.startsWith(targetWeekPrefix));
+    // 2순위: finishDate 이전의 스프린트 중 가장 최신
+    const pastSprints = realSprints
+      .filter(o => o.value <= targetWeekPrefix)
+      .sort((a, b) => b.value.localeCompare(a.value));
+    const latestSprint = exactMatch ?? (pastSprints[0] ?? realSprints[0] ?? sprintOptions[0]);
+    console.log(`[SPRINT-BACKLOG] Latest sprint: "${latestSprint.text}" (${latestSprint.value})`);
+    await mainPage.selectOption("#ctl00_AgileContents_ddl_SprintCode", { value: latestSprint.value });
+    await mainPage.waitForLoadState("networkidle");
+    await mainPage.waitForTimeout(2000);
+    // 기타업무 테이블 로딩 대기
+    await mainPage.waitForSelector("#ctl00_AgileContents_udp_otherwork", { timeout: 10000 }).catch(() => undefined);
+    await mainPage.waitForTimeout(1000);
+
+    // 2-a. 페이지네이션을 ALL로 변경하여 전체 항목 표시
+    try {
+      const pageOpts = await mainPage.$$eval(
+        "#ctl00_AgileContents_pagingOtherWork_ddl_page option",
+        (opts) => opts.map((o) => ({ value: (o as HTMLOptionElement).value, text: o.textContent?.trim() ?? "" }))
+      );
+      const allOpt = pageOpts.find(
+        (o) => o.text.toUpperCase() === "ALL" || o.value.toUpperCase() === "ALL" || o.text === "전체"
+      );
+      if (allOpt) {
+        console.log("[SPRINT-BACKLOG] Setting pagination to ALL...");
+        await mainPage.selectOption("#ctl00_AgileContents_pagingOtherWork_ddl_page", { value: allOpt.value });
+        await mainPage.waitForLoadState("networkidle");
+        await mainPage.waitForTimeout(1500);
+      } else if (pageOpts.length > 0) {
+        // ALL 옵션이 없으면 마지막(가장 큰) 옵션 선택
+        const lastOpt = pageOpts[pageOpts.length - 1];
+        console.log(`[SPRINT-BACKLOG] No ALL option; selecting largest page size: "${lastOpt.text}"`);
+        await mainPage.selectOption("#ctl00_AgileContents_pagingOtherWork_ddl_page", { value: lastOpt.value });
+        await mainPage.waitForLoadState("networkidle");
+        await mainPage.waitForTimeout(1500);
+      }
+    } catch {
+      console.log("[SPRINT-BACKLOG] Could not change pagination (selector not found); proceeding as-is.");
+    }
+
+    // 2. 기타업무 테이블에서 WORK_CODE 추출 (제목 매칭)
+    const { tableRows, tableSample } = await mainPage.evaluate(() => {
+      const table = document.querySelector("#ctl00_AgileContents_udp_otherwork");
+      if (!table) return { tableRows: [] as Array<{ code: string; subject: string }>, tableSample: "table not found" };
+      const allRows = Array.from(table.querySelectorAll("tr")).map(tr =>
+        Array.from(tr.querySelectorAll("td")).map(td => td.textContent?.trim() ?? "")
+      ).filter(cols => cols.some(c => c));
+      const rows = allRows
+        .map(cols => ({ code: cols[1] ?? "", subject: cols[3] ?? "" }))
+        .filter(r => r.code && r.subject);
+      return { tableRows: rows, tableSample: "" };
+    });
+    console.log(`[SPRINT-BACKLOG] OtherWork table rows: ${tableRows.length}개`);
+
+    // 3. 등록된 항목별로 completeSprint 팝업 열기
+    for (const item of items) {
+      const erpTitle = this.formatErpTitle(item.title, item.finishDate);
+      const matched = tableRows.find(r =>
+        this.normalizeText(r.subject).includes(this.normalizeText(erpTitle)) ||
+        this.normalizeText(r.subject).includes(this.normalizeText(item.title))
+      );
+      if (!matched) {
+        console.log(`[SPRINT-BACKLOG] SKIP: "${erpTitle}" not found in sprint backlog table.`);
+        continue;
+      }
+      console.log(`[SPRINT-BACKLOG] Found: CODE=${matched.code}, subject="${matched.subject}"`);
+
+      const completeUrl = `${COMPLETE_SPRINT_BASE}?mode=&WORK_CODE=${encodeURIComponent(matched.code)}&WORK_TYPE=4&SPRINT_CODE=${encodeURIComponent(latestSprint.value)}&postControlId=ctl00_AgileContents_btnl_dopostbackEvent&otherfinishdate=${encodeURIComponent(item.finishDate)}`;
+      console.log(`[SPRINT-BACKLOG] Opening completeSprint: ${completeUrl}`);
+
+      const sprintPage = await context.newPage();
+      try {
+        await sprintPage.goto(completeUrl, { waitUntil: "domcontentloaded" });
+        await sprintPage.waitForLoadState("networkidle").catch(() => undefined);
+
+        // 업무 내용 입력
+        const workComment = this.truncateComment(item.workComment, item.title);
+        await sprintPage.fill("#txt_developer", workComment);
+
+        // 검토 등급 선택 (상/중/하) — 단순 드롭다운이므로 직접 선택
+        if (item.priority?.trim()) {
+          await sprintPage.evaluate((priority) => {
+            const sel = document.getElementById("ddl_workReview") as HTMLSelectElement | null;
+            if (!sel) return;
+            for (const opt of Array.from(sel.options)) {
+              if (opt.text.trim() === priority || opt.value.trim() === priority) {
+                sel.value = opt.value;
+                return;
+              }
+            }
+          }, item.priority.trim());
+        }
+
+        // 등록 버튼 클릭
+        await sprintPage.click("#btnl_addIssueConfirm");
+        await sprintPage.waitForLoadState("networkidle").catch(() => undefined);
+        console.log(`[SPRINT-BACKLOG] Completed sprint backlog for "${matched.code}"`);
+      } catch (err) {
+        console.log(`[SPRINT-BACKLOG] ERROR on "${matched.code}": ${err instanceof Error ? err.message : err}`);
+      } finally {
+        await sprintPage.close().catch(() => undefined);
+      }
+    }
+  }
+
+  async register(items: OtherWorkDraft[], options?: { keepOpen?: boolean; dateYmd?: string; yesterdayItems?: OtherWorkDraft[]; leaveRequest?: boolean; signal?: AbortSignal }): Promise<RegisterSummary> {
     const channel = await detectBrowserChannel();
     console.log(`[BROWSER] Using ${channel}`);
     const browser = await chromium.launch({
@@ -1529,7 +1806,28 @@ export class ErpOtherWorkRegistrar {
 
     try {
       await this.login(page);
-      // Go directly to OtherWork page (skip SDMS main → menu click)
+      checkSignal(options?.signal);
+
+      // 0단계: 휴가계 작성 (연차/반차 해당 시 — 체크박스 활성화 시에만 실행)
+      if (options?.leaveRequest) {
+        for (const item of items) {
+          checkSignal(options?.signal);
+          const leaveType = detectLeaveType(item.sdmsCategoryRef);
+          if (leaveType) {
+            console.log(`[LEAVE] "${item.title}" → ${leaveType} 휴가계 작성 시작`);
+            await registerLeaveRequest(page, leaveType, item.finishDate);
+          }
+        }
+      }
+      checkSignal(options?.signal);
+
+      // 1단계: 업무일지 등록 (business.aspx)
+      if (options?.dateYmd) {
+        await this.registerBusinessLog(context, page, items, options.dateYmd);
+      }
+      checkSignal(options?.signal);
+
+      // 2단계: 기타업무 등록 (OtherWork page)
       console.log(`[NAV] Navigating directly to OtherWork page...`);
       await page.goto(OTHER_WORK_URL, { waitUntil: "domcontentloaded" });
       await page.waitForLoadState("networkidle");
@@ -1553,6 +1851,7 @@ export class ErpOtherWorkRegistrar {
       const SCRUM_ONLY_CATEGORIES = ["요구사항"];
 
       for (const item of items) {
+        checkSignal(options?.signal);
         const erpTitle = this.formatErpTitle(item.title, item.finishDate);
 
         // "요구사항" 카테고리: 기타업무 등록 생략 → Daily Scrum만 등록
@@ -1595,14 +1894,19 @@ export class ErpOtherWorkRegistrar {
         }
       }
 
-      // Always proceed to Daily Scrum (even if all items were skipped as duplicates)
+      checkSignal(options?.signal);
+      // 3단계: 일일 스크럼 등록
       if (options?.dateYmd) {
         await this.registerDailyScrum(context, mainPage, items, options.dateYmd, options.yesterdayItems ?? []);
       }
+      checkSignal(options?.signal);
 
-      // Register 업무일지 on business.aspx
+      // 4단계: 스프린트 백로그 완료 처리
       if (options?.dateYmd) {
-        await this.registerBusinessLog(context, mainPage, items, options.dateYmd);
+        const otherWorkOnly = items.filter(x => x.category === "기타업무");
+        if (otherWorkOnly.length > 0) {
+          await this.registerSprintBacklog(context, mainPage, otherWorkOnly);
+        }
       }
     } finally {
       await context.close();

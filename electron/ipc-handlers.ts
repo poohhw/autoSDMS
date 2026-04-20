@@ -6,8 +6,10 @@ import dotenv from "dotenv";
 import path from "node:path";
 import fs from "node:fs";
 import { TaskLogger, type LogEntry } from "../src/lib/logger.js";
+import { CancelledError } from "../src/lib/cancellation.js";
 import { runDailyRegistration } from "../src/lib/runDaily.js";
 import { runWeeklyRegistration } from "../src/lib/runWeekly.js";
+import { bulkCompleteOtherWork } from "../src/erp/otherWorkCompleter.js";
 import { readEnvObject, writeEnvObject, setEnvFilePath } from "../src/runtime/ensureEnv.js";
 import { FileLogger } from "./file-logger.js";
 
@@ -21,8 +23,11 @@ const REQUIRED_ENV_KEYS = [
   "NOTION_DATABASE_ID",
   "COMPANY_ID",
   "COMPANY_PASSWORD",
-  "EMPLOYEE_NAME"
+  "EMPLOYEE_NAME",
+  "GH_TOKEN"
 ];
+
+let currentAbortController: AbortController | null = null;
 
 export function registerIpcHandlers(mainWindow: BrowserWindow, baseDir: string): void {
   // userData 폴더에 .env 저장 (앱 업데이트해도 유지)
@@ -44,7 +49,9 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, baseDir: string):
   const fileLogger = new FileLogger(baseDir);
 
   // --- Task: Run Daily ---
-  ipcMain.handle("task:run-daily", async (_event, dateYmd: string, headed: boolean) => {
+  ipcMain.handle("task:run-daily", async (_event, dateYmd: string, headed: boolean, leaveRequest: boolean = false, slowMoMs: number = 0) => {
+    currentAbortController = new AbortController();
+    const { signal } = currentAbortController;
     const logger = new TaskLogger();
     logger.on("log", (entry: LogEntry) => {
       if (!mainWindow.isDestroyed()) {
@@ -55,28 +62,31 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, baseDir: string):
 
     try {
       const result = await logger.wrapConsole(() =>
-        runDailyRegistration({ dateYmd, headed, dryRun: false })
+        runDailyRegistration({ dateYmd, headed, dryRun: false, leaveRequest, signal, slowMoMs })
       );
       if (!mainWindow.isDestroyed()) {
         mainWindow.webContents.send("task:done", { success: true, result });
       }
       return { success: true, result };
     } catch (err) {
+      const cancelled = err instanceof CancelledError;
       const error = err instanceof Error ? err.message : String(err);
-      fileLogger.append({
-        level: "error",
-        message: `[FATAL] ${error}`,
-        timestamp: new Date().toISOString()
-      });
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("task:done", { success: false, error });
+      if (!cancelled) {
+        fileLogger.append({ level: "error", message: `[FATAL] ${error}`, timestamp: new Date().toISOString() });
       }
-      return { success: false, error };
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("task:done", { success: false, error, cancelled });
+      }
+      return { success: false, error, cancelled };
+    } finally {
+      currentAbortController = null;
     }
   });
 
   // --- Task: Run Weekly ---
-  ipcMain.handle("task:run-weekly", async (_event, dateYmd: string, headed: boolean) => {
+  ipcMain.handle("task:run-weekly", async (_event, dateYmd: string, headed: boolean, slowMoMs: number = 0) => {
+    currentAbortController = new AbortController();
+    const { signal } = currentAbortController;
     const logger = new TaskLogger();
     logger.on("log", (entry: LogEntry) => {
       if (!mainWindow.isDestroyed()) {
@@ -87,31 +97,86 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, baseDir: string):
 
     try {
       await logger.wrapConsole(() =>
-        runWeeklyRegistration({ dateYmd, headed, dryRun: false })
+        runWeeklyRegistration({ dateYmd, headed, dryRun: false, signal, slowMoMs })
       );
       if (!mainWindow.isDestroyed()) {
         mainWindow.webContents.send("task:done", { success: true });
       }
       return { success: true };
     } catch (err) {
+      const cancelled = err instanceof CancelledError;
       const error = err instanceof Error ? err.message : String(err);
-      fileLogger.append({
-        level: "error",
-        message: `[FATAL] ${error}`,
-        timestamp: new Date().toISOString()
-      });
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("task:done", { success: false, error });
+      if (!cancelled) {
+        fileLogger.append({ level: "error", message: `[FATAL] ${error}`, timestamp: new Date().toISOString() });
       }
-      return { success: false, error };
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("task:done", { success: false, error, cancelled });
+      }
+      return { success: false, error, cancelled };
+    } finally {
+      currentAbortController = null;
     }
+  });
+
+  // --- Bulk Complete ---
+  ipcMain.handle("task:bulk-complete", async (_event, headed: boolean, slowMoMs: number = 0) => {
+    currentAbortController = new AbortController();
+    const { signal } = currentAbortController;
+    const logger = new TaskLogger();
+    logger.on("log", (entry: LogEntry) => {
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("log:line", entry);
+      }
+      fileLogger.append(entry);
+    });
+
+    try {
+      dotenv.config({ path: ENV_FILE, override: true });
+      const envObj = readEnvObject();
+      const env = {
+        COMPANY_ID: envObj.COMPANY_ID || "",
+        COMPANY_PASSWORD: envObj.COMPANY_PASSWORD || "",
+        EMPLOYEE_NAME: envObj.EMPLOYEE_NAME || "",
+        COMPANY_LOGIN_URL: "http://erp.gcsc.co.kr/login.aspx",
+      };
+
+      const result = await logger.wrapConsole(() =>
+        bulkCompleteOtherWork(env, { headed, signal, slowMoMs })
+      );
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("task:done", { success: true });
+      }
+      return { success: true, ...result };
+    } catch (err) {
+      const cancelled = err instanceof CancelledError;
+      const error = err instanceof Error ? err.message : String(err);
+      if (!cancelled) {
+        fileLogger.append({ level: "error", message: `[FATAL] ${error}`, timestamp: new Date().toISOString() });
+      }
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("task:done", { success: false, error, cancelled });
+      }
+      return { success: false, error, cancelled };
+    } finally {
+      currentAbortController = null;
+    }
+  });
+
+  // --- Task: Cancel ---
+  ipcMain.handle("task:cancel", () => {
+    if (currentAbortController) {
+      currentAbortController.abort();
+      return { cancelled: true };
+    }
+    return { cancelled: false };
   });
 
   // --- Environment ---
   ipcMain.handle("env:status", () => {
     dotenv.config({ path: ENV_FILE, override: true });
     const envObj = readEnvObject();
-    const missing = REQUIRED_ENV_KEYS.filter((k) => !envObj[k]?.trim());
+    const OPTIONAL_KEYS = ["GH_TOKEN"];
+    const missing = REQUIRED_ENV_KEYS.filter((k) => !OPTIONAL_KEYS.includes(k) && !envObj[k]?.trim());
     return { valid: missing.length === 0, missing };
   });
 

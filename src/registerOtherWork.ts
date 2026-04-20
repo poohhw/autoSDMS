@@ -50,6 +50,17 @@ async function main(): Promise<void> {
 
   const otherWorkItems = mapNotionPagesToOtherWorkDrafts(dayData.pages);
 
+  // Relation ID → 제목 변환 (sdmsCategoryRef)
+  const relationIds = otherWorkItems.map((i) => i.sdmsCategoryRef).filter((x): x is string => !!x);
+  if (relationIds.length > 0) {
+    const titleMap = await notion.resolveRelationIds(relationIds);
+    for (const item of otherWorkItems) {
+      if (item.sdmsCategoryRef && titleMap.has(item.sdmsCategoryRef)) {
+        item.sdmsCategoryRef = titleMap.get(item.sdmsCategoryRef) || item.sdmsCategoryRef;
+      }
+    }
+  }
+
   if (otherWorkItems.length === 0) {
     console.log(`[INFO] No work items found on ${dateYmd}.`);
     return;
@@ -76,20 +87,33 @@ async function main(): Promise<void> {
     )
   );
 
-  // Fetch previous business day data for 전일 업무 registration
+  // 전일 업무 조회: 최근 5 영업일 역순으로 데이터가 있는 날 사용
+  let yesterdayItems: ReturnType<typeof mapNotionPagesToOtherWorkDrafts> = [];
+  let foundPrevDateYmd = "";
   const targetDate = new Date(`${dateYmd}T00:00:00`);
-  const prevBizDate = getPreviousBusinessDay(targetDate);
-  const prevDateYmd = toYmd(prevBizDate);
-  console.log(`[INFO] Previous business day: ${prevDateYmd} (for 전일 업무)`);
-
-  const prevDayData = await notion.fetchByDate(prevDateYmd);
-  fs.writeFileSync(
-    path.join(rawDumpDir, `${prevDateYmd}-raw.json`),
-    JSON.stringify(prevDayData.pages, null, 2),
-    "utf8"
-  );
-  const yesterdayItems = mapNotionPagesToOtherWorkDrafts(prevDayData.pages);
-  console.log(`[INFO] Found ${yesterdayItems.length} previous-day items on ${prevDateYmd}.`);
+  let scanDate = new Date(targetDate);
+  for (let i = 0; i < 5; i++) {
+    scanDate = getPreviousBusinessDay(scanDate);
+    const scanYmd = toYmd(scanDate);
+    const scanData = await notion.fetchByDate(scanYmd);
+    fs.writeFileSync(
+      path.join(rawDumpDir, `${scanYmd}-raw.json`),
+      JSON.stringify(scanData.pages, null, 2),
+      "utf8"
+    );
+    const items = mapNotionPagesToOtherWorkDrafts(scanData.pages);
+    if (items.length > 0) {
+      yesterdayItems = items;
+      foundPrevDateYmd = scanYmd;
+      break;
+    }
+    console.log(`[INFO] No items on ${scanYmd}, checking earlier...`);
+  }
+  if (foundPrevDateYmd) {
+    console.log(`[INFO] Found ${yesterdayItems.length} previous-day items on ${foundPrevDateYmd} (전일 업무).`);
+  } else {
+    console.log(`[INFO] No previous-day items found in the last 5 business days.`);
+  }
 
   if (dryRun) {
     console.log("[INFO] Dry run mode enabled. Skip ERP registration.");
